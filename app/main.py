@@ -8,10 +8,20 @@ from app.config import Config
 from app.db import init_db
 from app.services import (
     apply_contract,
+    card_view,
+    decide,
     list_contracts,
+    list_directory,
     list_reports,
+    list_watermarks,
+    open_card,
+    parent_detail,
+    refreeze,
+    remove_edge,
     run_breaking_check,
     run_reconcile,
+    upsert_edge,
+    waterline,
 )
 from app.services.errors import ServiceError
 
@@ -38,6 +48,16 @@ def create_app(db_path: str | None = None) -> web.Application:
     app.router.add_get("/api/contracts", api_contracts)
     app.router.add_post("/api/contracts/{cid}/breaking-check", api_breaking)
     app.router.add_post("/api/contracts/{cid}/apply", api_apply)
+    app.router.add_get("/api/contracts/{cid}/upgrade-card", api_upgrade_card)
+    app.router.add_get("/api/contracts/{cid}/card", api_card_view)
+    app.router.add_post("/api/contracts/{cid}/lineage/refreeze", api_refreeze)
+    app.router.add_post("/api/contracts/{cid}/lineage/decide", api_decide)
+    app.router.add_get("/api/lineage/edges", api_edges)
+    app.router.add_post("/api/lineage/edges", api_add_edge)
+    app.router.add_delete("/api/lineage/edges", api_del_edge)
+    app.router.add_get("/api/lineage/parents/{name}", api_parent)
+    app.router.add_get("/api/lineage/watermarks", api_watermarks)
+    app.router.add_get("/api/lineage/waterline", api_waterline)
     app.router.add_get("/api/reconcile-reports", api_reports)
     app.router.add_post("/api/reconcile-reports", api_reconcile)
     return app
@@ -137,6 +157,118 @@ async def api_apply(request: web.Request):
         require_user(request)
         cid = int(request.match_info["cid"])
         return json_resp({"contract": apply_contract(cid, request.app.get("db_path"))})
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+
+
+async def api_upgrade_card(request: web.Request):
+    try:
+        user = require_user(request)
+        cid = int(request.match_info["cid"])
+        return json_resp({"card": open_card(cid, user, request.app.get("db_path"))})
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+
+
+async def api_refreeze(request: web.Request):
+    try:
+        user = require_user(request)
+        cid = int(request.match_info["cid"])
+        return json_resp({"card": refreeze(cid, user, request.app.get("db_path"))})
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+
+
+async def api_decide(request: web.Request):
+    try:
+        user = require_user(request)
+        cid = int(request.match_info["cid"])
+        result = decide(cid, user, request.app.get("db_path"))
+        result["card"] = card_view(cid, request.app.get("db_path"))
+        return json_resp(result)
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+
+
+async def api_card_view(request: web.Request):
+    try:
+        require_user(request)
+        cid = int(request.match_info["cid"])
+        return json_resp({"card": card_view(cid, request.app.get("db_path"))})
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+
+
+async def api_edges(request: web.Request):
+    try:
+        require_user(request)
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+    return json_resp({"items": list_directory(request.app.get("db_path"))})
+
+
+async def api_watermarks(request: web.Request):
+    try:
+        require_user(request)
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+    child = request.query.get("child_table") or None
+    return json_resp({"items": list_watermarks(child, request.app.get("db_path"))})
+
+
+async def api_waterline(request: web.Request):
+    try:
+        require_user(request)
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+    return json_resp({"items": waterline(request.app.get("db_path"))})
+
+
+async def api_add_edge(request: web.Request):
+    try:
+        user = require_user(request)
+        body = await request.json()
+        return json_resp(
+            {
+                "result": upsert_edge(
+                    str(body.get("child_table", "")),
+                    str(body.get("child_field", "")),
+                    str(body.get("parent_table", "")),
+                    str(body.get("parent_field", "")),
+                    user,
+                    request.app.get("db_path"),
+                )
+            }
+        )
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+
+
+async def api_del_edge(request: web.Request):
+    try:
+        user = require_user(request)
+        body = await request.json()
+        return json_resp(
+            {
+                "result": remove_edge(
+                    str(body.get("child_table", "")),
+                    str(body.get("child_field", "")),
+                    str(body.get("parent_table", "")),
+                    str(body.get("parent_field", "")),
+                    user,
+                    request.app.get("db_path"),
+                )
+            }
+        )
+    except ServiceError as exc:
+        return json_resp({"error": exc.message}, exc.status_code)
+
+
+async def api_parent(request: web.Request):
+    try:
+        require_user(request)
+        name = request.match_info["name"]
+        return json_resp({"parent": parent_detail(name, request.app.get("db_path"))})
     except ServiceError as exc:
         return json_resp({"error": exc.message}, exc.status_code)
 
